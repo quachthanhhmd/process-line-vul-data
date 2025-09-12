@@ -1,0 +1,82 @@
+seed: 7
+num_workers: 8
+log_offline: false
+
+joern_path: "<joern_path>"
+split_token: false
+
+
+big_vul_csv_path: "/data/linevul_data.csv"
+project_name: "<project_name>"
+
+local_dir: "true"
+local_dir_xfg_path: "XFG"
+local_dir_source_code_path: "source_code"
+train_test_split_csv: "true"
+local_dir_csv_path: "csv"
+
+split_folder_name: "<folder_name>"
+root_folder_path: "<root_folder_path>"
+sensiAPI_path: "<sensiAPI_path>"
+ts_logger_path: "<ts_logger_path>"
+csv_data_path: "<csv_data_path>"
+
+
+save_every_epoch: 1
+val_every_epoch: 1
+log_every_epoch: 10
+progress_bar_refresh_rate: 1
+
+dataset:
+  name: "<project_name>"
+  token:
+    max_parts: 100
+    is_wrapped: false
+    is_splitted: false
+    vocabulary_size: 190000
+
+gnn:
+  # gcn, ggnn
+  name: "gcn"
+  w2v_path: "${root_folder_path}/${split_folder_name}/w2v.wv"
+  embed_size: 256
+  hidden_size: 256
+  pooling_ratio: 0.8
+  drop_out: 0.5
+  n_hidden_layers: 3
+  n_head: 3
+  n_gru: 3
+  edge_sample_ratio: 0.8
+  rnn:
+    hidden_size: 256
+    num_layers: 1
+    drop_out: 0.5
+    use_bi: true
+    activation: relu
+
+classifier:
+  hidden_size: 512
+  n_hidden_layers: 2
+  n_classes: 2
+  drop_out: 0.5
+
+hyper_parameters:
+  vector_length: 128
+
+  n_epochs: 50
+  patience: 10
+  batch_size: 64
+  test_batch_size: 64
+  reload_dataloader: true
+  clip_norm: 5
+  val_every_step: 1.0
+  log_every_n_steps: 50
+  progress_bar_refresh_rate: 1
+  resume_from_checkpoint: null
+  shuffle_data: true
+
+  optimizer: "Adam"
+  nesterov: true
+  learning_rate: 0.002
+  weight_decay: 0
+  decay_gamma: 0.95

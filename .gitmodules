@@ -1,0 +1,3 @@
+[submodule "LineVul"]
+	path = LineVul
+	url = https://github.com/awsm-research/LineVul.git
