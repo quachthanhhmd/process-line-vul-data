@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  joern:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./project:/project
+    ports:
+      - 8888:8888
