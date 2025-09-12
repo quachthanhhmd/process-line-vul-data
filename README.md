@@ -20,7 +20,7 @@
     프로젝트 루트 디렉터리에서 다음 명령어를 실행하여 Docker 이미지를 빌드합니다. 이 과정은 의존성 패키지와 `big-vul` 데이터셋을 모두 이미지에 포함시키며, 최초 빌드 시 시간이 다소 소요될 수 있습니다.
 
     ```sh
-    docker build -t linevul-env .
+    docker build --no-cache -t linevul-env .
     ```
 
 2.  **Docker 컨테이너 실행**
@@ -45,8 +45,9 @@
 
     > **참고:** 아래 명령어의 `--epochs` 값은 논문과 동일한 10으로 설정되어 있습니다. 필요에 맞게 조절하십시오.
 
-    **host os: Linux**
+    **host os Linux**
     ```sh
+    # 1. 학습 + 테스트
     docker exec -w /app/LineVul/linevul linevul-container python linevul_main.py \
       --output_dir ./saved_models \
       --model_type roberta \
@@ -65,10 +66,25 @@
       --max_grad_norm 1.0 \
       --evaluate_during_training \
       --seed 123456 2>&1 | tee train.log
+
+    # 2. 테스트
+    docker exec -w /app/LineVul/linevul linevul-container python linevul_main.py \
+    --model_name=12heads_linevul_model.bin \
+    --output_dir=./saved_models \
+    --model_type=roberta \
+    --tokenizer_name=microsoft/codebert-base \
+    --model_name_or_path=microsoft/codebert-base \
+    --do_test \
+    --train_data_file=../data/big-vul_dataset/train.csv \
+    --eval_data_file=../data/big-vul_dataset/val.csv \
+    --test_data_file=../data/big-vul_dataset/test.csv \
+    --block_size 512 \
+    --eval_batch_size 512
     ```
 
     **host os Windows**
     ```sh
+    # 1. 학습 + 테스트
     docker exec -w /app/LineVul/linevul linevul-container python linevul_main.py `
     --output_dir ./saved_models `
     --model_type roberta `
@@ -87,6 +103,20 @@
     --max_grad_norm 1.0 `
     --evaluate_during_training `
     --seed 123456 *>&1 | Tee-Object -FilePath train.log
+
+    # 2. 테스트
+    docker exec -w /app/LineVul/linevul linevul-container python linevul_main.py `
+    --model_name=12heads_linevul_model.bin `
+    --output_dir=./saved_models `
+    --model_type=roberta `
+    --tokenizer_name=microsoft/codebert-base \
+    --model_name_or_path=microsoft/codebert-base \
+    --do_test \
+    --train_data_file=../data/big-vul_dataset/train.csv \
+    --eval_data_file=../data/big-vul_dataset/val.csv \
+    --test_data_file=../data/big-vul_dataset/test.csv \
+    --block_size 512 \
+    --eval_batch_size 512
     ```
 
 4.  **학습 과정 모니터링**
