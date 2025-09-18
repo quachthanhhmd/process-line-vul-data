@@ -152,8 +152,8 @@
 
 ### pretrained_model로 realvul 평가
 0. 도커 컨테이너를 실행한다.
-    - GPU 사용 시: `docker-compose up deepwukong -d`
-    - CPU 사용 시: `docker-compose up deepwukong_without_gpu -d`
+    - GPU 사용 시: `docker-compose up -d deepwukong`
+    - CPU 사용 시: `docker-compose up -d deepwukong_without_gpu`
 0. 
 1. Experiments/DeepWukong/config/config.yaml에서 `csv_data_path`을 `/data/dataset/all_csv.tar.gz`로 변경
 2. Experiments/DeepWukong/deepwukong_pipeline.sh의 `project_name`을 `all`로 변경, `SLURM_TMPDIR`을 `/code/models/DeepWukong/data/realvul`으로 변경
