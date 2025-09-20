@@ -8,7 +8,7 @@ from omegaconf import OmegaConf, DictConfig
 from typing import cast, List
 from argparse import ArgumentParser
 module_path = os.path.abspath(
-    '/home/p9chakra/MY_DRIVES/ProgramFiles/evaluating-deep-learning-based-vulnerability-detection-models-on-realistic-datasets/models/DeepWukong/')
+    '/data/RealVul/Experiments/DeepWukong/')
 
 if module_path not in sys.path:
     sys.path.append(module_path)
@@ -84,7 +84,7 @@ def train_word_embedding(config_path: str):
     print("training w2v...")
     num_workers = cpu_count(
     ) if config.num_workers == -1 else config.num_workers
-    model = Word2Vec(sentences=tokens_list, min_count=3, vector_size=config.gnn.embed_size,
+    model = Word2Vec(sentences=tokens_list, min_count=3, size=config.gnn.embed_size,
                      max_vocab_size=config.dataset.token.vocabulary_size, workers=num_workers, sg=1)
     model.wv.save(f"{root}/{split_folder}/w2v.wv")
     model.save(f"{root}/{split_folder}/w2v.model")
@@ -109,7 +109,7 @@ def load_wv(config_path: str):
 
 
 if __name__ == '__main__':
-    os.environ["SLURM_TMPDIR"] = "project"
+    os.environ["SLURM_TMPDIR"] = "."
     __arg_parser = ArgumentParser()
     __arg_parser.add_argument("-c",
                               "--config",
