@@ -8,6 +8,13 @@ import numpy
 import torch,ray
 import json
 import os
+import sys
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
+os.environ['RAY_TMPDIR'] = '/data/tmp'
+os.environ['TMPDIR'] = '/data/tmp'
+os.environ['RAY_USE_MULTIPROCESSING_CPU_COUNT'] = '32'
 import networkx as nx
 from os.path import exists
 from tqdm import tqdm
@@ -151,37 +158,100 @@ def unique_xfg_sym(xfg_path_list,config):
     # for i in xfg_path_list:
     #     ray_xfgs.append(read_xfg.remote(i))
     # xfgs = ray.get(ray_xfgs) 
-    for path_item in tqdm(xfg_path_list, total=len(xfg_path_list), desc="xfgs: "):
-        xfg,xfg_path = read_normal_xfg(path_item) 
-        label = xfg.graph["label"]
-        file_path=join(config.local_dir_source_code_path,xfg.graph["file_paths"][0])
-     
-        assert exists(file_path), f"{file_path} not exists!"
-        for ln in xfg:
-            ln_md5 = getMD5(str(xfg.nodes[ln]["code_sym_token"]))
-            xfg.nodes[ln]["md5"] = ln_md5
-        edges_md5 = list()
-        for edge in xfg.edges:
-            edges_md5.append(xfg.nodes[edge[0]]["md5"] + "_" + xfg.nodes[edge[1]]["md5"])
-        xfg_md5 = getMD5(str(sorted(edges_md5)))
-        if xfg_md5 not in md5_dict:
-            md5_dict[xfg_md5] = dict()
-            md5_dict[xfg_md5]["label"] = label
-            md5_dict[xfg_md5]["xfg"] = xfg_path
-            md5_dict[xfg_md5]["file_path"]=file_path
-            
-        else:
-            md5_label = md5_dict[xfg_md5]["label"]
-            if md5_label==-1:
-                    conflict_ct += 1
+    # Ray parallel processing
+    import ray
+    from multiprocessing import cpu_count
+    
+    @ray.remote
+    def process_xfg_batch(batch_paths, config):
+        """XFG 배치를 병렬로 처리"""
+        batch_results = []
+        for path_item in batch_paths:
+            try:
+                xfg, xfg_path = read_normal_xfg(path_item)
+                label = xfg.graph["label"]
+                file_path = join(config.local_dir_source_code_path, xfg.graph["file_paths"][0])
                 
-            if md5_label!=-1 and md5_label != label:
-                conflict_ct += 1
-                md5_dict[xfg_md5]["label"] = -1
-                md5_dict[xfg_md5]["xfg"] = xfg_path
-                md5_dict[xfg_md5]["file_path"]=file_path
-            else:
-                mul_ct += 1
+                if not exists(file_path):
+                    continue
+                    
+                # Calculate node MD5 (skip nodes without code_sym_token)
+                nodes_to_remove = []
+                for ln in xfg:
+                    if "code_sym_token" not in xfg.nodes[ln]:
+                        nodes_to_remove.append(ln)
+                        continue
+                    if len(xfg.nodes[ln]["code_sym_token"]) == 0:
+                        nodes_to_remove.append(ln)
+                        continue
+                    ln_md5 = getMD5(str(xfg.nodes[ln]["code_sym_token"]))
+                    xfg.nodes[ln]["md5"] = ln_md5
+                
+                # Remove nodes with empty tokens
+                if nodes_to_remove:
+                    xfg.remove_nodes_from(nodes_to_remove)
+                
+                # Skip if all nodes are removed
+                if len(xfg.nodes) == 0:
+                    continue
+                
+                # Calculate edge MD5
+                edges_md5 = []
+                for edge in xfg.edges:
+                    edges_md5.append(xfg.nodes[edge[0]]["md5"] + "_" + xfg.nodes[edge[1]]["md5"])
+                
+                xfg_md5 = getMD5(str(sorted(edges_md5)))
+                batch_results.append({
+                    'xfg_md5': xfg_md5,
+                    'label': label,
+                    'xfg_path': xfg_path,
+                    'file_path': file_path
+                })
+            except Exception as e:
+                print(f"Error processing {path_item}: {e}")
+                continue
+                
+        return batch_results
+    
+    # Split into batches for parallel processing
+    batch_size = max(100, len(xfg_path_list) // (cpu_count() * 4))
+    batches = [xfg_path_list[i:i+batch_size] for i in range(0, len(xfg_path_list), batch_size)]
+    
+    print(f"Processing {len(xfg_path_list)} XFGs in {len(batches)} batches using Ray...")
+    
+    # Process all batches in parallel
+    batch_futures = [process_xfg_batch.remote(batch, config) for batch in batches]
+    
+    # Collect results
+    with tqdm(total=len(xfg_path_list), desc="Processing XFGs") as pbar:
+        for future in batch_futures:
+            batch_results = ray.get(future)
+            pbar.update(len(batch_results))
+            
+            # Merge results into main dictionary
+            for result in batch_results:
+                xfg_md5 = result['xfg_md5']
+                label = result['label']
+                xfg_path = result['xfg_path']
+                file_path = result['file_path']
+                
+                if xfg_md5 not in md5_dict:
+                    md5_dict[xfg_md5] = {
+                        'label': label,
+                        'xfg': xfg_path,
+                        'file_path': file_path
+                    }
+                else:
+                    md5_label = md5_dict[xfg_md5]["label"]
+                    if md5_label == -1:
+                        conflict_ct += 1
+                    elif md5_label != -1 and md5_label != label:
+                        conflict_ct += 1
+                        md5_dict[xfg_md5]["label"] = -1
+                        md5_dict[xfg_md5]["xfg"] = xfg_path
+                        md5_dict[xfg_md5]["file_path"] = file_path
+                    else:
+                        mul_ct += 1
     print(f"total conflit: {conflict_ct}")
     print(f"total multiple: {mul_ct}")
     return md5_dict
