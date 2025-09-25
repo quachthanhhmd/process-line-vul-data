@@ -1,3 +1,8 @@
+# User defined
+ts_logger
+lightning_logs
+.realvul/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
