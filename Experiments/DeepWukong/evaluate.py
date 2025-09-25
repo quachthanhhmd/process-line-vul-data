@@ -40,6 +40,7 @@ def test(checkpoint_path: str, root_folder_path: str = None,split_folder_name: s
     data_module = XFGDataModule(config, vocabulary)
     gpu = 1 if torch.cuda.is_available() else None
     trainer = Trainer(gpus=gpu)
+    print("start testing")
     trainer.test(model, datamodule=data_module)
 
 
