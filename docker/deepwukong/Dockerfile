@@ -34,7 +34,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 RUN pip install --no-cache-dir --upgrade pip
 
 # PyTorch 관련 패키지들을 먼저 설치 (GPU 버전, 의존성 순서 고려)
-RUN pip install --no-cache-dir torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==0.9.0 --extra-index-url https://download.pytorch.org/whl/cu118
+RUN pip install --no-cache-dir torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 --extra-index-url https://download.pytorch.org/whl/cu118
 RUN pip install --no-cache-dir torch-geometric==2.3.1
 # torch-scatter와 torch-sparse 설치 (torch-geometric 의존성)
 RUN pip install --no-cache-dir torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.0.1+cu118.html

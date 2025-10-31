@@ -211,10 +211,9 @@
 ### pretrained_model로 deepwukong 데이터셋(SARD-CWE119) 평가
 0. deepwukong의 실험을 재현하기 위해 [data](https://github.com/jumormt/DeepWukong?tab=readme-ov-file#setup)와 [pretrained_model](https://github.com/jumormt/DeepWukong?tab=readme-ov-file#one-step-evaluation)를 다운로드 받아 압축 해제 후 Experiments/DeepWukong/data로 옮긴다. `7z x Data.7z -o/code/models/DeepWukong/data/`
 1. 도커 컨테이너를 실행한다.
-    - GPU 사용 시: `docker-compose up deepwukong -d`
-    - CPU 사용 시: `docker-compose up deepwukong_without_gpu -d`
-2. Experiments/DeepWukong/config/config.yaml에서 `split_folder_name`을 `CWE119`로 변경
-3. `PYTORCH_JIT=0 SLURM_TMPDIR=. python evaluate.py ./data/DeepWukong --root_folder_path ./data --split_folder_name CWE119`
+    - GPU 사용 시: `docker-compose up -d deepwukong`
+    - CPU 사용 시: `docker-compose up -d deepwukong_without_gpu`
+2. `PYTORCH_JIT=0 SLURM_TMPDIR=. python evaluate.py ./data/DeepWukong --root_folder_path ./data --split_folder_name CWE119`
 
 ### pretrained_model로 realvul 평가
 0. 도커 컨테이너를 실행한다.
