@@ -2,6 +2,7 @@ version: '3.8'
 services:
   deepwukong:
     build: ./docker/deepwukong
+    shm_size: '64g'
     deploy:
       resources:
         reservations:
@@ -12,24 +13,10 @@ services:
     volumes:
       - deepwukong_model:/code/models/DeepWukong
       - dataset:/data/dataset/
-      - deepwukong_config:/config
   deepwukong_without_gpu:
     build: ./docker/deepwukong
     volumes:
       - deepwukong_model:/code/models/DeepWukong
-      - dataset:/data/dataset/
-      - deepwukong_config:/config
-  reveal:
-    build: ./docker/reveal
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    volumes:
-      - reveal_model:/code/models/ReVeal
       - dataset:/data/dataset/
 volumes:
   dataset:
@@ -44,15 +31,3 @@ volumes:
       type: none
       o: bind
       device: ./Experiments/DeepWukong
-  deepwukong_config:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./Experiments/DeepWukong/config
-  reveal_model:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./Experiments/ReVeal

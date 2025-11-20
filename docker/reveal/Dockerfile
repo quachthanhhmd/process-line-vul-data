@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # 시스템 패키지 업데이트 및 필요한 의존성 설치
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing --no-install-recommends  \
     python3.8 \
     python3.8-dev \
     python3-pip \
@@ -68,12 +68,16 @@ RUN git clone https://github.com/VulDetProject/ReVeal.git \
 	&& cd ./ReVeal/code-slicer/joern \
 	&& ./build.sh
 
-WORKDIR /code/models/ReVeal/data/all
-RUN mkdir source_code && cp /data/dataset/all_source_code/11111.c ./source_code # ln -s /data/dataset/all_source_code source_code
-RUN /tools/ReVeal/code-slicer/joern/joern-parse ./source_code
-RUN mv parsed/ csv/
+# WORKDIR /code/models/ReVeal/data/all
+# RUN mkdir source_code && cp /data/dataset/all_source_code/11111.c ./source_code # ln -s /data/dataset/all_source_code source_code
+# RUN /tools/ReVeal/code-slicer/joern/joern-parse ./source_code
+# RUN mv parsed/ csv/
 
-RUN jupyter nbconvert --execute extract_slices.ipynb --to notebook --inplace
-
+# RUN mkdir data && jupyter nbconvert --execute extract_slices.ipynb --to notebook --inplace
+# python Representational_Learning/word2vec_train.py
 # 기본 명령어 설정 - 컨테이너가 계속 실행되도록
 CMD ["tail", "-f", "/dev/null"]
+
+# mv parsed/ csv/ && mkdir data && jupyter nbconvert --execute extract_slices.ipynb --to notebook --inplace
+# python Representational_Learning/word2vec_train.py --data_paths data/comp_vul_full_data_with_slices.json  --epochs 20 --embedding_size 100
+# python create_ggnn_data.py 부터 쭉~
