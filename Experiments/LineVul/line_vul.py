@@ -183,6 +183,8 @@ def train_filter(source_codes,labels):
     return [modified_source_codes,modified_labels]
 
 def test_filter(source_codes,labels):
+    collisions=0
+    duplicates=0
     final_samples=defaultdict(dict)
     modified_source_codes,modified_labels=[],[]
     for i,_ in tqdm(enumerate(labels),total=len(labels)):
