@@ -28,7 +28,7 @@ class XFGDataset(Dataset):
         self.__vocab = vocab
         self.__XFGs = list()
 
-        self.root_XFG_path = join(os.environ["SLURM_TMPDIR"], self.__config.local_dir_xfg_path) if hasattr(self.__config, "local_dir_xfg_path") else os.environ["SLURM_TMPDIR"]
+        self.root_XFG_path = os.path.join(config.root_folder_path, config.split_folder_name, "XFG") if hasattr(self.__config, "local_dir_xfg_path") else os.environ["SLURM_TMPDIR"]
        
         # ray_xfgs=[]
         # for xfg_path in __XFG_paths_all:

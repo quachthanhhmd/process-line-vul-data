@@ -68,4 +68,3 @@ python3 "preprocess/word_embedding.py" -c "./config/config.yaml"
 
 # #Training and Testing
 # SLURM_TMPDIR="." python3 "run.py" -c "./config/config.yaml"
-
