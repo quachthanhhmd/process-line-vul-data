@@ -25,8 +25,15 @@ fi
 mkdir -p "$SLURM_TMPDIR" || { echo "Failed to create $SLURM_TMPDIR" >&2; exit 1; }
 cd $SLURM_TMPDIR
 
-#source_code extraction
+# Source code preparation (prepare.sh에서 다운로드한 파일을 압축 해제)
+# docker-compose.yml에서 /data/dataset으로 마운트됨
 if [ "$ARGUMENT" = "all" ]; then
+    # 전체 데이터 (이미 압축 해제되어 있음)
+    if [ ! -d "/data/dataset/all_source_code" ]; then
+        echo "Extracting all_source_code..."
+        tar -xf "/data/dataset/RealVul_Dataset-all_source_code.tar.xz" -C "/data/dataset/"
+        mv "/data/dataset/source_code" "/data/dataset/all_source_code"
+    fi
     ln -s "/data/dataset/all_source_code" "source_code"
 else
     project_src_tar_gz=${PROJECT_NAME}_source_code.tar.gz
