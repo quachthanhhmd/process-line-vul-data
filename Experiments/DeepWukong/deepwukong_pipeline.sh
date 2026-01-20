@@ -27,14 +27,14 @@ cd $SLURM_TMPDIR
 
 # Source code preparation (prepare.sh에서 다운로드한 파일을 압축 해제)
 # docker-compose.yml에서 /data/dataset으로 마운트됨
-if [ "$ARGUMENT" = "all" ]; then
+if [ "$PROJECT_NAME" = "all" ]; then
     # 전체 데이터 (이미 압축 해제되어 있음)
-    if [ ! -d "/data/dataset/all_source_code" ]; then
+    if [ ! -d "/data/dataset/$DS_NAME/all_source_code" ]; then
         echo "Extracting all_source_code..."
-        tar -xf "/data/dataset/RealVul_Dataset-all_source_code.tar.xz" -C "/data/dataset/"
-        mv "/data/dataset/source_code" "/data/dataset/all_source_code"
+        tar -xf "/data/dataset/$DS_NAME/all_source_code.tar.xz" -C "/data/dataset/$DS_NAME/"
+        mv "/data/dataset/$DS_NAME/source_code" "/data/dataset/$DS_NAME/all_source_code"
     fi
-    ln -s "/data/dataset/all_source_code" "source_code"
+    ln -s "/data/dataset/$DS_NAME/all_source_code" "source_code"
 else
     # 특정 프로젝트 데이터
     echo "Extracting ${PROJECT_NAME} source code..."

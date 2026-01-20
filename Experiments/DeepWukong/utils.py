@@ -9,12 +9,14 @@ import torch,ray
 import json
 import os
 import sys
+import ray
+from multiprocessing import cpu_count
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 os.environ['RAY_TMPDIR'] = '/data/tmp'
 os.environ['TMPDIR'] = '/data/tmp'
-os.environ['RAY_USE_MULTIPROCESSING_CPU_COUNT'] = '32'
+os.environ['RAY_USE_MULTIPROCESSING_CPU_COUNT'] = cpu_count().__str__()
 import networkx as nx
 from os.path import exists
 from tqdm import tqdm
@@ -159,8 +161,7 @@ def unique_xfg_sym(xfg_path_list,config):
     #     ray_xfgs.append(read_xfg.remote(i))
     # xfgs = ray.get(ray_xfgs) 
     # Ray parallel processing
-    import ray
-    from multiprocessing import cpu_count
+    
     
     @ray.remote
     def process_xfg_batch(batch_paths, config):
