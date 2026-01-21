@@ -126,7 +126,7 @@ def extract_nodes_with_location_info(nodes):
     return node_indices, node_ids, line_numbers, node_id_to_line_number
 
 
-def build_PDG(code_path: str, sensi_api_path: str,
+def build_PDG(code_path: str, sensi_api_set,
               source_path: str) -> Tuple[nx.DiGraph, Dict[str, Set[int]]]:
     """
     build program dependence graph from code
@@ -142,9 +142,6 @@ def build_PDG(code_path: str, sensi_api_path: str,
         nodes_path = join(code_path, "nodes.csv")
         edges_path = join(code_path, "edges.csv")
         # print(nodes_path)
-        assert exists(sensi_api_path), f"{sensi_api_path} not exists!"
-        with open(sensi_api_path, "r", encoding="utf-8") as f:
-            sensi_api_set = set([api.strip() for api in f.read().split(",")])
         if not exists(nodes_path) or not exists(edges_path):
             return None, None
         nodes = read_csv(nodes_path)
@@ -314,9 +311,9 @@ def configure_arg_parser() -> ArgumentParser:
 
 
 @ray.remote
-def process_parallel(testcase:str, doneIDs: Set, codeIDtoPath: Dict, root: str,
-                     source_root_path: str,
-                     out_root_path: str,config):
+def process_parallel(testcase:str, doneIDs: Set, codeIDtoPath: Dict, csv_path: str,
+                     sensi_api_set,
+                     out_root_path: str):
     """
 
     Args:
@@ -335,13 +332,9 @@ def process_parallel(testcase:str, doneIDs: Set, codeIDtoPath: Dict, root: str,
         if testcase in doneIDs:
             return testcase
         vul_lines = codeIDtoPath[testcase]
-        
-        csv_path = join(os.environ["SLURM_TMPDIR"],config.local_dir_csv_path,testcase)
-        source_path = testcase
 
-        sensiAPI_path= config.sensiAPI_path
-        PDG, key_line_map = build_PDG(csv_path, sensiAPI_path ,
-                                      source_path)
+        PDG, key_line_map = build_PDG(csv_path, sensi_api_set,
+                                      testcase)
         # print(PDG, key_line_map)
         res = build_XFG(PDG, key_line_map, vul_lines)
         # print("res", res)
@@ -379,6 +372,7 @@ if __name__ == "__main__":
             exit(1)
     vul_data=pd.Series(vul_data_csv.vulnerable_line_numbers.values,index=vul_data_csv.unique_file_name).fillna('').to_dict()
     codeIDtoPath = getCodeIDtoPathDict(vul_data, source_root_path)
+    codeIDtoPath_ref = ray.put(codeIDtoPath)
     # print(codeIDtoPath)
 
     if not exists(out_root_path):
@@ -388,6 +382,10 @@ if __name__ == "__main__":
     # 작업 목록 준비
     task_list = [i for i in codeIDtoPath if isinstance(i, str)]
     total_tasks = len(task_list)
+    sensiAPI_path= config.sensiAPI_path
+    with open(config.sensiAPI_path, "r", encoding="utf-8") as f:
+        sensi_api_set = set([api.strip() for api in f.read().split(",")])
+    sensi_api_set_ref = ray.put(sensi_api_set)
     
     if total_tasks == 0:
         print("No tasks to process.")
@@ -405,10 +403,12 @@ if __name__ == "__main__":
         
         # Initial batch submission
         for i in range(initial_batch_size):
+            csv_path = join(os.environ["SLURM_TMPDIR"],config.local_dir_csv_path,task_list[i])
             pending.append(process_parallel.remote(task_list[i], doneIDs=[], 
-                                                 codeIDtoPath=codeIDtoPath,
-                                                 root=root, source_root_path=source_root_path,
-                                                 out_root_path=out_root_path, config=config))
+                                                 codeIDtoPath=codeIDtoPath_ref,
+                                                 csv_path=csv_path,
+                                                 out_root_path=out_root_path,
+                                                 sensi_api_set=sensi_api_set_ref))
         
         # Index for remaining tasks
         next_task_idx = initial_batch_size
@@ -436,10 +436,12 @@ if __name__ == "__main__":
             # Submit new tasks (as many as completed)
             for _ in range(len(done)):
                 if next_task_idx < total_tasks:
+                    csv_path = join(os.environ["SLURM_TMPDIR"],config.local_dir_csv_path,task_list[next_task_idx])
                     pending.append(process_parallel.remote(task_list[next_task_idx], doneIDs=[], 
-                                                         codeIDtoPath=codeIDtoPath,
-                                                         root=root, source_root_path=source_root_path,
-                                                         out_root_path=out_root_path, config=config))
+                                                 codeIDtoPath=codeIDtoPath_ref,
+                                                 csv_path=csv_path,
+                                                 out_root_path=out_root_path,
+                                                 sensi_api_set=sensi_api_set_ref))
                     next_task_idx += 1
         
         pbar.close()
