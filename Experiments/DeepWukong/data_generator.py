@@ -393,8 +393,8 @@ if __name__ == "__main__":
     else:
         print(f"Processing {total_tasks} tasks (CPU cores: {USE_CPU})")
         
-        # Initial task submission (2x CPU cores)
-        initial_batch_size = min(USE_CPU * 2, total_tasks)
+        # Initial task submission (CPU cores)
+        initial_batch_size = min(USE_CPU, total_tasks)
         pending, results, failures = [], [], []
         
         # Progress bar setup
