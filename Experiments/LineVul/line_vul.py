@@ -333,8 +333,12 @@ if args.prepare_dataset:
     # Save test CSV
     pd.DataFrame({"source_code": filtered_test_source_code, "label": filtered_test_labels}).to_csv(join(dataset_path, "test.csv"), index=False)
 
-    X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
-    test_dataset = Dataset(X_chunked_test_tokenized,filtered_test_labels) 
+    if len(filtered_test_source_code) > 0:
+        X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
+        test_dataset = Dataset(X_chunked_test_tokenized,filtered_test_labels) 
+    else:
+        print("Warning: Test dataset is empty after filtering. Skipping test dataset tokenization.")
+        test_dataset = Dataset({"input_ids": []}, []) # Create dummy empty dataset
 
     with open(join(dataset_path,"test_dataset.pkl"), "wb") as output_file:
         pickle.dump(test_dataset, output_file)
