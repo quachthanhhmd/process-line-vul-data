@@ -270,6 +270,8 @@ parser.add_argument("--test_predict", default=False,action='store_true',
                     help="test_predict")
 parser.add_argument("--train_predict", default=False,action='store_true',
                     help="train_predict")
+parser.add_argument("--data_type", type=str, choices=['train', 'val', 'test'], default=None,
+                    help="If provided, treat the entire input file as this type (no splitting).")
 
 args = parser.parse_args()
 
@@ -296,52 +298,85 @@ project_df=pd.read_csv(dataset_csv_path)
 if "flaw_line_index" in project_df.columns and "vulnerable_line_numbers" not in project_df.columns:
     project_df["vulnerable_line_numbers"] = project_df["flaw_line_index"]
 
-if "dataset_type" not in project_df.columns:
+if "dataset_type" not in project_df.columns and args.data_type is None:
     print("Warning: 'dataset_type' column missing. Defaulting all data to 'train_val'.")
     project_df["dataset_type"] = "train_val"
 
 project_df["vulnerable_line_numbers"]=project_df["vulnerable_line_numbers"].fillna("")
-train_val=project_df[project_df["dataset_type"]=="train_val"]
-test_data=project_df[project_df["dataset_type"]=="test"]
-
 
 
 if args.prepare_dataset:
     print("Preparing Dataset...")
     tokenizer = RobertaTokenizer.from_pretrained(tokenizer_name)
-    source_code,labels=prepare_dataset(train_val,tokenizer)
-    filtered_source_code,filtered_labels=train_filter(source_code,labels)
-    train_source_code, val_source_code,train_labels,val_labels = train_test_split(filtered_source_code,filtered_labels, test_size=0.1)
+    
+    if args.data_type:
+        # SINGLE DATASET MODE (No splitting)
+        print(f"Processing entire file as SINGLE type: {args.data_type}")
+        target_df = project_df # Use all rows
+        
+        raw_source, raw_labels = prepare_dataset(target_df, tokenizer)
+        
+        # Determine filter type (Train/Val get train_filter, Test gets test_filter)
+        if args.data_type in ['train', 'val']:
+            filtered_source, filtered_labels = train_filter(raw_source, raw_labels)
+        else: # test
+            filtered_source, filtered_labels = test_filter(raw_source, raw_labels)
+            
+        # Save CSV
+        pd.DataFrame({"source_code": filtered_source, "label": filtered_labels}).to_csv(join(dataset_path, f"{args.data_type}.csv"), index=False)
+        
+        # Tokenize
+        if len(filtered_source) > 0:
+            tokenized_input = tokenizer(filtered_source, padding=True, truncation=True, max_length=512)
+            dataset_obj = Dataset(tokenized_input, filtered_labels)
+        else:
+            print(f"Warning: {args.data_type} dataset is empty after filtering.")
+            dataset_obj = Dataset({"input_ids": []}, [])
+            
+        # Save PKL
+        pkl_name = f"{args.data_type}_dataset.pkl"
+        with open(join(dataset_path, pkl_name), "wb") as output_file:
+            pickle.dump(dataset_obj, output_file)
+            print(f"Saved {pkl_name}")
 
-    # Save train/val CSV
-    pd.DataFrame({"source_code": train_source_code, "label": train_labels}).to_csv(join(dataset_path, "train.csv"), index=False)
-    pd.DataFrame({"source_code": val_source_code, "label": val_labels}).to_csv(join(dataset_path, "val.csv"), index=False)
-
-    X_chunked_train_tokenized = tokenizer(train_source_code,padding=True, truncation=True, max_length=512)
-    X_chunked_val_tokenized = tokenizer(val_source_code,padding=True, truncation=True, max_length=512)
-    train_dataset = Dataset(X_chunked_train_tokenized, train_labels)
-    val_dataset = Dataset(X_chunked_val_tokenized, val_labels)
-    with open(join(dataset_path,"train_dataset.pkl"), "wb") as output_file:
-        pickle.dump(train_dataset, output_file)
-
-    with open(join(dataset_path,"val_dataset.pkl"), "wb") as output_file:
-        pickle.dump(val_dataset, output_file)
-
-    test_source_code,test_labels=prepare_dataset(test_data,tokenizer)
-    filtered_test_source_code,filtered_test_labels=test_filter(test_source_code,test_labels)
-
-    # Save test CSV
-    pd.DataFrame({"source_code": filtered_test_source_code, "label": filtered_test_labels}).to_csv(join(dataset_path, "test.csv"), index=False)
-
-    if len(filtered_test_source_code) > 0:
-        X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
-        test_dataset = Dataset(X_chunked_test_tokenized,filtered_test_labels) 
     else:
-        print("Warning: Test dataset is empty after filtering. Skipping test dataset tokenization.")
-        test_dataset = Dataset({"input_ids": []}, []) # Create dummy empty dataset
+        # LEGACY MODE (Split based on 'dataset_type' or default split)
+        train_val=project_df[project_df["dataset_type"]=="train_val"]
+        test_data=project_df[project_df["dataset_type"]=="test"]
 
-    with open(join(dataset_path,"test_dataset.pkl"), "wb") as output_file:
-        pickle.dump(test_dataset, output_file)
+        source_code,labels=prepare_dataset(train_val,tokenizer)
+        filtered_source_code,filtered_labels=train_filter(source_code,labels)
+        train_source_code, val_source_code,train_labels,val_labels = train_test_split(filtered_source_code,filtered_labels, test_size=0.1)
+
+        # Save train/val CSV
+        pd.DataFrame({"source_code": train_source_code, "label": train_labels}).to_csv(join(dataset_path, "train.csv"), index=False)
+        pd.DataFrame({"source_code": val_source_code, "label": val_labels}).to_csv(join(dataset_path, "val.csv"), index=False)
+
+        X_chunked_train_tokenized = tokenizer(train_source_code,padding=True, truncation=True, max_length=512)
+        X_chunked_val_tokenized = tokenizer(val_source_code,padding=True, truncation=True, max_length=512)
+        train_dataset = Dataset(X_chunked_train_tokenized, train_labels)
+        val_dataset = Dataset(X_chunked_val_tokenized, val_labels)
+        with open(join(dataset_path,"train_dataset.pkl"), "wb") as output_file:
+            pickle.dump(train_dataset, output_file)
+
+        with open(join(dataset_path,"val_dataset.pkl"), "wb") as output_file:
+            pickle.dump(val_dataset, output_file)
+
+        test_source_code,test_labels=prepare_dataset(test_data,tokenizer)
+        filtered_test_source_code,filtered_test_labels=test_filter(test_source_code,test_labels)
+
+        # Save test CSV
+        pd.DataFrame({"source_code": filtered_test_source_code, "label": filtered_test_labels}).to_csv(join(dataset_path, "test.csv"), index=False)
+
+        if len(filtered_test_source_code) > 0:
+            X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
+            test_dataset = Dataset(X_chunked_test_tokenized,filtered_test_labels) 
+        else:
+            print("Warning: Test dataset is empty after filtering. Skipping test dataset tokenization.")
+            test_dataset = Dataset({"input_ids": []}, []) # Create dummy empty dataset
+
+        with open(join(dataset_path,"test_dataset.pkl"), "wb") as output_file:
+            pickle.dump(test_dataset, output_file)
 
 else:
     print("Loading Dataset...")
