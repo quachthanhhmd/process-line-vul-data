@@ -94,53 +94,23 @@ class Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.encodings["input_ids"])
     
-def create_token_chunks_vulnerable_samples(code_statements,all_special_ids,vulnerable_line_numbers):
-    i=0
-    samples,labels=[],[]
-    while i<len(code_statements):
-        tokens=[]
-        k=i
-        while i<len(code_statements):
-            modified_input_ids=[]
-            for j in range(len(code_statements[i])):
-                if code_statements[i][j] not in all_special_ids:
-                    modified_input_ids.append(code_statements[i][j])
-
-            if len(tokens)+len(modified_input_ids)<=510:
-                tokens.extend(modified_input_ids)
-            else:
-                break
-            i+=1
-        flag=False
-        samples.append(removeComments(tokenizer.decode(tokens)))
-        for line_number in vulnerable_line_numbers:
-            if int(line_number) in range(k,i):
-                flag=True
-                break
-        if flag:
-            labels.append(1)
-        else:
-            labels.append(0)
-    return samples,labels
-
 def read_file_label(sample,tokenizer):
-    label=1 if sample["vulnerable_line_numbers"] else 0
-    all_special_ids=tokenizer.all_special_ids
-    source_code=sample["processed_func"].split("\n")
-    inputs,labels=[],[]
-    if label==1:
-        samples,mixed_labels=create_token_chunks_vulnerable_samples(tokenizer(source_code)["input_ids"],all_special_ids,sample["vulnerable_line_numbers"].split(","))
-        inputs.extend(samples)
-        labels.extend(mixed_labels)
+    # Determine label from 'target', 'label', or presence of vulnerable lines
+    if "target" in sample:
+        label = int(sample["target"])
+    elif "label" in sample:
+        label = int(sample["label"])
     else:
-        input_id=tokenizer(removeComments("".join(source_code)))["input_ids"]
-        modified_input_ids=[]
-        for i in range(len(input_id)):
-            if input_id[i] not in all_special_ids:
-                modified_input_ids.append(input_id[i])
-        for i in range(0,len(modified_input_ids),510):
-            inputs.append(tokenizer.decode(modified_input_ids[i:i+510]))
-            labels.append(label)
+        label = 0
+        
+    source_code = sample["processed_func"]
+    # Remove comments
+    cleaned_code = removeComments(source_code)
+    
+    # Return as list to maintain compatibility with batch extension logic
+    inputs = [cleaned_code]
+    labels = [label]
+    
     return inputs,labels
 
 @ray.remote
@@ -152,12 +122,10 @@ def read_file_label_batch(samples,tokenizer):
         batch_labels.extend(labels)
     return batch_inputs,batch_labels
 
-
-
 def prepare_dataset(samples,tokenizer):
         records=samples.to_dict("records")
         batch_size=3000
-        chunk_size = 10  # 한 번에 10개 task만 처리
+        chunk_size = 10  # Process 10 batches at a time
         source_codes, labels = [], []
         
         all_batches = list(range(0, len(records), batch_size))
@@ -171,7 +139,6 @@ def prepare_dataset(samples,tokenizer):
                     read_file_label_batch.remote(records[i:i+batch_size], tokenizer)
                 )
             
-            # 10개씩만 join
             result = ray.get(process_examples)
             for source_code, label in result:
                 source_codes.extend(source_code)
@@ -294,15 +261,9 @@ if not exists(output_dir):
 
 project_df=pd.read_csv(dataset_csv_path)
 
-# Compatability for custom dataset schema
-if "flaw_line_index" in project_df.columns and "vulnerable_line_numbers" not in project_df.columns:
-    project_df["vulnerable_line_numbers"] = project_df["flaw_line_index"]
-
 if "dataset_type" not in project_df.columns and args.data_type is None:
     print("Warning: 'dataset_type' column missing. Defaulting all data to 'train_val'.")
     project_df["dataset_type"] = "train_val"
-
-project_df["vulnerable_line_numbers"]=project_df["vulnerable_line_numbers"].fillna("")
 
 
 if args.prepare_dataset:
@@ -323,7 +284,7 @@ if args.prepare_dataset:
             filtered_source, filtered_labels = test_filter(raw_source, raw_labels)
             
         # Save CSV
-        pd.DataFrame({"source_code": filtered_source, "label": filtered_labels}).to_csv(join(dataset_path, f"{args.data_type}.csv"), index=False)
+        pd.DataFrame({"processed_func": filtered_source, "target": filtered_labels}).to_csv(join(dataset_path, f"{args.data_type}.csv"), index=False)
         
         # Tokenize
         if len(filtered_source) > 0:
@@ -349,8 +310,8 @@ if args.prepare_dataset:
         train_source_code, val_source_code,train_labels,val_labels = train_test_split(filtered_source_code,filtered_labels, test_size=0.1)
 
         # Save train/val CSV
-        pd.DataFrame({"source_code": train_source_code, "label": train_labels}).to_csv(join(dataset_path, "train.csv"), index=False)
-        pd.DataFrame({"source_code": val_source_code, "label": val_labels}).to_csv(join(dataset_path, "val.csv"), index=False)
+        pd.DataFrame({"processed_func": train_source_code, "target": train_labels}).to_csv(join(dataset_path, "train.csv"), index=False)
+        pd.DataFrame({"processed_func": val_source_code, "target": val_labels}).to_csv(join(dataset_path, "val.csv"), index=False)
 
         X_chunked_train_tokenized = tokenizer(train_source_code,padding=True, truncation=True, max_length=512)
         X_chunked_val_tokenized = tokenizer(val_source_code,padding=True, truncation=True, max_length=512)
@@ -366,7 +327,7 @@ if args.prepare_dataset:
         filtered_test_source_code,filtered_test_labels=test_filter(test_source_code,test_labels)
 
         # Save test CSV
-        pd.DataFrame({"source_code": filtered_test_source_code, "label": filtered_test_labels}).to_csv(join(dataset_path, "test.csv"), index=False)
+        pd.DataFrame({"processed_func": filtered_test_source_code, "target": filtered_test_labels}).to_csv(join(dataset_path, "test.csv"), index=False)
 
         if len(filtered_test_source_code) > 0:
             X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
