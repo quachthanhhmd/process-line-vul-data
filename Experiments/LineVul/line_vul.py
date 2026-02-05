@@ -123,17 +123,13 @@ def create_token_chunks_vulnerable_samples(code_statements,all_special_ids,vulne
             labels.append(0)
     return samples,labels
 
-def read_file_label(sample,tokenizer):
+def read_file_label(sample,tokenizer, include_metadata=True):
     label=1 if sample["vulnerable_line_numbers"] else 0
     all_special_ids=tokenizer.all_special_ids
     source_code=sample["processed_func"].split("\n")
     inputs,labels=[],[]
     flaw_lines, flaw_line_indices = [], []
     
-    # Get metadata from sample, safely handle missing keys
-    flaw_line_val = sample.get("flaw_line", "")
-    flaw_line_index_val = sample.get("flaw_line_index", "")
-
     if label==1:
         samples,mixed_labels=create_token_chunks_vulnerable_samples(tokenizer(source_code)["input_ids"],all_special_ids,sample["vulnerable_line_numbers"].split(","))
         inputs.extend(samples)
@@ -148,28 +144,42 @@ def read_file_label(sample,tokenizer):
             inputs.append(tokenizer.decode(modified_input_ids[i:i+510]))
             labels.append(label)
     
-    # Propagate metadata for each chunk derived from this sample
-    for _ in range(len(inputs)):
-        flaw_lines.append(flaw_line_val)
-        flaw_line_indices.append(flaw_line_index_val)
-
-    return inputs,labels,flaw_lines,flaw_line_indices
+    if include_metadata:
+        # Get metadata from sample, safely handle missing keys
+        flaw_line_val = sample.get("flaw_line", "")
+        flaw_line_index_val = sample.get("flaw_line_index", "")
+        # Propagate metadata for each chunk derived from this sample
+        for _ in range(len(inputs)):
+            flaw_lines.append(flaw_line_val)
+            flaw_line_indices.append(flaw_line_index_val)
+        return inputs,labels,flaw_lines,flaw_line_indices
+    else:
+        return inputs,labels
 
 @ray.remote
-def read_file_label_batch(samples,tokenizer):
+def read_file_label_batch(samples,tokenizer, include_metadata=True):
     batch_inputs,batch_labels=[],[]
     batch_flaw_lines, batch_flaw_indices = [], []
     for sample in samples:
-        inputs,labels,flaw_lines,flaw_line_indices=read_file_label(sample,tokenizer)
-        batch_inputs.extend(inputs)
-        batch_labels.extend(labels)
-        batch_flaw_lines.extend(flaw_lines)
-        batch_flaw_indices.extend(flaw_line_indices)
-    return batch_inputs,batch_labels,batch_flaw_lines,batch_flaw_indices
+        if include_metadata:
+            inputs,labels,flaw_lines,flaw_line_indices=read_file_label(sample,tokenizer, include_metadata=True)
+            batch_inputs.extend(inputs)
+            batch_labels.extend(labels)
+            batch_flaw_lines.extend(flaw_lines)
+            batch_flaw_indices.extend(flaw_line_indices)
+        else:
+            inputs,labels=read_file_label(sample,tokenizer, include_metadata=False)
+            batch_inputs.extend(inputs)
+            batch_labels.extend(labels)
+
+    if include_metadata:
+        return batch_inputs,batch_labels,batch_flaw_lines,batch_flaw_indices
+    else:
+        return batch_inputs,batch_labels
 
 
 
-def prepare_dataset(samples,tokenizer):
+def prepare_dataset(samples,tokenizer, include_metadata=True):
         records=samples.to_dict("records")
         batch_size=3000
         chunk_size = 10  # 한 번에 10개 task만 처리
@@ -184,33 +194,45 @@ def prepare_dataset(samples,tokenizer):
             
             for i in all_batches[chunk_start:chunk_end]:
                 process_examples.append(
-                    read_file_label_batch.remote(records[i:i+batch_size], tokenizer)
+                    read_file_label_batch.remote(records[i:i+batch_size], tokenizer, include_metadata)
                 )
             
             # 10개씩만 join
             result = ray.get(process_examples)
-            for source_code, label, f_line, f_index in result:
-                source_codes.extend(source_code)
-                labels.extend(label)
-                flaw_lines.extend(f_line)
-                flaw_line_indices.extend(f_index)
+            
+            if include_metadata:
+                for source_code, label, f_line, f_index in result:
+                    source_codes.extend(source_code)
+                    labels.extend(label)
+                    flaw_lines.extend(f_line)
+                    flaw_line_indices.extend(f_index)
+            else:
+                for source_code, label in result:
+                    source_codes.extend(source_code)
+                    labels.extend(label)
         
-        return source_codes, labels, flaw_lines, flaw_line_indices
+        if include_metadata:
+            return source_codes, labels, flaw_lines, flaw_line_indices
+        else:
+            return source_codes, labels
 
 
 
-def train_filter(source_codes,labels,flaw_lines,flaw_line_indices):
+def train_filter(source_codes,labels,flaw_lines=None,flaw_line_indices=None):
     final_samples=defaultdict(dict)
     modified_source_codes,modified_labels=[],[]
     modified_flaw_lines, modified_flaw_indices = [], []
+    
+    include_metadata = (flaw_lines is not None) and (flaw_line_indices is not None)
 
     for i,_ in tqdm(enumerate(labels),total=len(labels)):
             hash1=getMD5("".join(source_codes[i].split()))
             if hash1 not in final_samples:
                 final_samples[hash1]["source_code"]=source_codes[i]
                 final_samples[hash1]["label"]=labels[i]
-                final_samples[hash1]["flaw_line"]=flaw_lines[i]
-                final_samples[hash1]["flaw_line_index"]=flaw_line_indices[i]
+                if include_metadata:
+                    final_samples[hash1]["flaw_line"]=flaw_lines[i]
+                    final_samples[hash1]["flaw_line_index"]=flaw_line_indices[i]
             else:
                 old_label=final_samples[hash1]["label"]
                 if (old_label!=-1 and old_label!=labels[i]) or (old_label==-1):
@@ -221,25 +243,32 @@ def train_filter(source_codes,labels,flaw_lines,flaw_line_indices):
         if final_samples[i]["label"]!=-1:
             modified_source_codes.append(final_samples[i]["source_code"])
             modified_labels.append(final_samples[i]["label"])
-            modified_flaw_lines.append(final_samples[i].get("flaw_line",""))
-            modified_flaw_indices.append(final_samples[i].get("flaw_line_index",""))
+            if include_metadata:
+                modified_flaw_lines.append(final_samples[i].get("flaw_line",""))
+                modified_flaw_indices.append(final_samples[i].get("flaw_line_index",""))
             
-    return modified_source_codes,modified_labels,modified_flaw_lines,modified_flaw_indices
+    if include_metadata:
+        return modified_source_codes,modified_labels,modified_flaw_lines,modified_flaw_indices
+    else:
+        return modified_source_codes,modified_labels
 
-def test_filter(source_codes,labels,flaw_lines,flaw_line_indices):
+def test_filter(source_codes,labels,flaw_lines=None,flaw_line_indices=None):
     collisions=0
     duplicates=0
     final_samples=defaultdict(dict)
     modified_source_codes,modified_labels=[],[]
     modified_flaw_lines, modified_flaw_indices = [], []
+    
+    include_metadata = (flaw_lines is not None) and (flaw_line_indices is not None)
 
     for i,_ in tqdm(enumerate(labels),total=len(labels)):
             hash1=getMD5("".join(source_codes[i].split()))
             if hash1 not in final_samples:
                 final_samples[hash1]["source_code"]=[source_codes[i]]
                 final_samples[hash1]["label"]=[labels[i]]
-                final_samples[hash1]["flaw_line"]=[flaw_lines[i]]
-                final_samples[hash1]["flaw_line_index"]=[flaw_line_indices[i]]
+                if include_metadata:
+                    final_samples[hash1]["flaw_line"]=[flaw_lines[i]]
+                    final_samples[hash1]["flaw_line_index"]=[flaw_line_indices[i]]
             else:
                 old_label=final_samples[hash1]["label"]
                 if (old_label!=-1 and old_label!=labels[i]) or (old_label==-1):
@@ -249,18 +278,23 @@ def test_filter(source_codes,labels,flaw_lines,flaw_line_indices):
                 else:
                     final_samples[hash1]["source_code"].append(source_codes[i])
                     final_samples[hash1]["label"].append(labels[i])
-                    final_samples[hash1]["flaw_line"].append(flaw_lines[i])
-                    final_samples[hash1]["flaw_line_index"].append(flaw_line_indices[i])
+                    if include_metadata:
+                        final_samples[hash1]["flaw_line"].append(flaw_lines[i])
+                        final_samples[hash1]["flaw_line_index"].append(flaw_line_indices[i])
                     duplicates+=1
     
     for i in final_samples:
         if final_samples[i]["label"]!=-1:
             modified_source_codes.extend(final_samples[i]["source_code"])
             modified_labels.extend(final_samples[i]["label"])
-            modified_flaw_lines.extend(final_samples[i]["flaw_line"])
-            modified_flaw_indices.extend(final_samples[i]["flaw_line_index"])
+            if include_metadata:
+                modified_flaw_lines.extend(final_samples[i]["flaw_line"])
+                modified_flaw_indices.extend(final_samples[i]["flaw_line_index"])
 
-    return modified_source_codes,modified_labels,modified_flaw_lines,modified_flaw_indices
+    if include_metadata:
+        return modified_source_codes,modified_labels,modified_flaw_lines,modified_flaw_indices
+    else:
+        return modified_source_codes,modified_labels
 
 
 
@@ -305,6 +339,8 @@ parser.add_argument("--train_predict", default=False,action='store_true',
                     help="train_predict")
 parser.add_argument("--data_type", type=str, choices=['train', 'val', 'test'], default=None,
                     help="If provided, treat the entire input file as this type (no splitting).")
+parser.add_argument("--no_metadata", default=False, action='store_true',
+                    help="If set, do not include flaw_line and flaw_line_index in output CSV.")
 
 args = parser.parse_args()
 
@@ -335,6 +371,9 @@ if "dataset_type" not in project_df.columns and args.data_type is None:
     print("Warning: 'dataset_type' column missing. Defaulting all data to 'train_val'.")
     project_df["dataset_type"] = "train_val"
 
+if "vulnerable_line_numbers" not in project_df.columns:
+    project_df["vulnerable_line_numbers"] = ""
+
 project_df["vulnerable_line_numbers"]=project_df["vulnerable_line_numbers"].fillna("")
 
 
@@ -342,18 +381,30 @@ if args.prepare_dataset:
     print("Preparing Dataset...")
     tokenizer = RobertaTokenizer.from_pretrained(tokenizer_name)
     
+    include_metadata = not args.no_metadata
+    
     if args.data_type:
         # SINGLE DATASET MODE (No splitting)
         print(f"Processing entire file as SINGLE type: {args.data_type}")
         target_df = project_df # Use all rows
         
-        raw_source, raw_labels = prepare_dataset(target_df, tokenizer)
+        if include_metadata:
+            raw_source, raw_labels, raw_flaw_lines, raw_flaw_indices = prepare_dataset(target_df, tokenizer, include_metadata=True)
+        else:
+            raw_source, raw_labels = prepare_dataset(target_df, tokenizer, include_metadata=False)
+            raw_flaw_lines, raw_flaw_indices = None, None
         
         # Determine filter type (Train/Val get train_filter, Test gets test_filter)
         if args.data_type in ['train', 'val']:
-            filtered_source, filtered_labels = train_filter(raw_source, raw_labels)
+            if include_metadata:
+                 filtered_source, filtered_labels, filtered_flaw_lines, filtered_flaw_indices = train_filter(raw_source, raw_labels, raw_flaw_lines, raw_flaw_indices)
+            else:
+                 filtered_source, filtered_labels = train_filter(raw_source, raw_labels)
         else: # test
-            filtered_source, filtered_labels = test_filter(raw_source, raw_labels)
+            if include_metadata:
+                filtered_source, filtered_labels, filtered_flaw_lines, filtered_flaw_indices = test_filter(raw_source, raw_labels, raw_flaw_lines, raw_flaw_indices)
+            else:
+                filtered_source, filtered_labels = test_filter(raw_source, raw_labels)
             
         # Save CSV
         output_df = pd.DataFrame({
@@ -361,26 +412,13 @@ if args.prepare_dataset:
             "target": filtered_labels
         })
         
-        # Add metadata only if it's test set or if explicitly available
-        if args.data_type == 'test':
+        # Add metadata only if it's test set or if explicitly available AND --no_metadata is NOT set
+        if args.data_type == 'test' and include_metadata:
              output_df["flaw_line"] = filtered_flaw_lines
              output_df["flaw_line_index"] = filtered_flaw_indices
              
         output_df.to_csv(join(dataset_path, f"{args.data_type}.csv"), index=False)
         print(f"Saved {args.data_type}.csv")
-        # Tokenize
-        if len(filtered_source) > 0:
-            tokenized_input = tokenizer(filtered_source, padding=True, truncation=True, max_length=512)
-            dataset_obj = Dataset(tokenized_input, filtered_labels)
-        else:
-            print(f"Warning: {args.data_type} dataset is empty after filtering.")
-            dataset_obj = Dataset({"input_ids": []}, [])
-            
-        # Save PKL
-        pkl_name = f"{args.data_type}_dataset.pkl"
-        with open(join(dataset_path, pkl_name), "wb") as output_file:
-            pickle.dump(dataset_obj, output_file)
-            print(f"Saved {pkl_name}")
 
     else:
         # LEGACY MODE (Split based on 'dataset_type' or default split)
@@ -388,51 +426,49 @@ if args.prepare_dataset:
         test_data=project_df[project_df["dataset_type"]=="test"]
 
         # Train/Val processing
-        source_code,labels,flaw_lines,flaw_indices=prepare_dataset(train_val,tokenizer)
-        filtered_source_code,filtered_labels,filtered_flaw_lines,filtered_flaw_indices=train_filter(source_code,labels,flaw_lines,flaw_indices)
+        if include_metadata:
+            source_code,labels,flaw_lines,flaw_indices=prepare_dataset(train_val,tokenizer, include_metadata=True)
+            filtered_source_code,filtered_labels,filtered_flaw_lines,filtered_flaw_indices=train_filter(source_code,labels,flaw_lines,flaw_indices)
+        else:
+            source_code,labels=prepare_dataset(train_val,tokenizer, include_metadata=False)
+            filtered_source_code,filtered_labels=train_filter(source_code,labels)
+            filtered_flaw_lines, filtered_flaw_indices = None, None
         
-        # Split all 4 arrays
-        train_source_code, val_source_code, train_labels, val_labels, \
-        _, _, _, _ = train_test_split(
-            filtered_source_code, filtered_labels, filtered_flaw_lines, filtered_flaw_indices, test_size=0.1
-        )
+        # Split logic
+        if include_metadata:
+             train_source_code, val_source_code, train_labels, val_labels, \
+             _, _, _, _ = train_test_split(
+                filtered_source_code, filtered_labels, filtered_flaw_lines, filtered_flaw_indices, test_size=0.1
+            )
+        else:
+             train_source_code, val_source_code, train_labels, val_labels = train_test_split(
+                filtered_source_code, filtered_labels, test_size=0.1
+            )
 
         # Save train/val CSV (No metadata needed for training usually)
         pd.DataFrame({"processed_func": train_source_code, "target": train_labels}).to_csv(join(dataset_path, "train.csv"), index=False)
         pd.DataFrame({"processed_func": val_source_code, "target": val_labels}).to_csv(join(dataset_path, "val.csv"), index=False)
 
-        X_chunked_train_tokenized = tokenizer(train_source_code,padding=True, truncation=True, max_length=512)
-        X_chunked_val_tokenized = tokenizer(val_source_code,padding=True, truncation=True, max_length=512)
-        train_dataset = Dataset(X_chunked_train_tokenized, train_labels)
-        val_dataset = Dataset(X_chunked_val_tokenized, val_labels)
-        with open(join(dataset_path,"train_dataset.pkl"), "wb") as output_file:
-            pickle.dump(train_dataset, output_file)
-
-        with open(join(dataset_path,"val_dataset.pkl"), "wb") as output_file:
-            pickle.dump(val_dataset, output_file)
-
         # Test processing
-        test_source_code,test_labels,test_flaw_lines,test_flaw_indices=prepare_dataset(test_data,tokenizer)
-        filtered_test_source_code,filtered_test_labels,filtered_test_flaw_lines,filtered_test_flaw_indices=test_filter(test_source_code,test_labels,test_flaw_lines,test_flaw_indices)
+        if include_metadata:
+            test_source_code,test_labels,test_flaw_lines,test_flaw_indices=prepare_dataset(test_data,tokenizer, include_metadata=True)
+            filtered_test_source_code,filtered_test_labels,filtered_test_flaw_lines,filtered_test_flaw_indices=test_filter(test_source_code,test_labels,test_flaw_lines,test_flaw_indices)
+        else:
+            test_source_code,test_labels=prepare_dataset(test_data,tokenizer, include_metadata=False)
+            filtered_test_source_code,filtered_test_labels=test_filter(test_source_code,test_labels)
 
         # Save test CSV with metadata
-        pd.DataFrame({
+        test_output_df = pd.DataFrame({
             "processed_func": filtered_test_source_code, 
-            "target": filtered_test_labels,
-            "flaw_line": filtered_test_flaw_lines,
-            "flaw_line_index": filtered_test_flaw_indices
-        }).to_csv(join(dataset_path, "test.csv"), index=False)
+            "target": filtered_test_labels
+        })
+        
+        if not args.no_metadata:
+            test_output_df["flaw_line"] = filtered_test_flaw_lines
+            test_output_df["flaw_line_index"] = filtered_test_flaw_indices
+            
+        test_output_df.to_csv(join(dataset_path, "test.csv"), index=False)
         print("Saved train.csv, val.csv, test.csv")
-
-        if len(filtered_test_source_code) > 0:
-            X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
-            test_dataset = Dataset(X_chunked_test_tokenized,filtered_test_labels) 
-        else:
-            print("Warning: Test dataset is empty after filtering. Skipping test dataset tokenization.")
-            test_dataset = Dataset({"input_ids": []}, []) # Create dummy empty dataset
-
-        with open(join(dataset_path,"test_dataset.pkl"), "wb") as output_file:
-            pickle.dump(test_dataset, output_file)
 
 else:
     print("Loading Dataset...")
