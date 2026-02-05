@@ -291,6 +291,15 @@ if not exists(output_dir):
 
 
 project_df=pd.read_csv(dataset_csv_path)
+
+# Compatability for custom dataset schema
+if "flaw_line_index" in project_df.columns and "vulnerable_line_numbers" not in project_df.columns:
+    project_df["vulnerable_line_numbers"] = project_df["flaw_line_index"]
+
+if "dataset_type" not in project_df.columns:
+    print("Warning: 'dataset_type' column missing. Defaulting all data to 'train_val'.")
+    project_df["dataset_type"] = "train_val"
+
 project_df["vulnerable_line_numbers"]=project_df["vulnerable_line_numbers"].fillna("")
 train_val=project_df[project_df["dataset_type"]=="train_val"]
 test_data=project_df[project_df["dataset_type"]=="test"]
@@ -303,6 +312,11 @@ if args.prepare_dataset:
     source_code,labels=prepare_dataset(train_val,tokenizer)
     filtered_source_code,filtered_labels=train_filter(source_code,labels)
     train_source_code, val_source_code,train_labels,val_labels = train_test_split(filtered_source_code,filtered_labels, test_size=0.1)
+
+    # Save train/val CSV
+    pd.DataFrame({"source_code": train_source_code, "label": train_labels}).to_csv(join(dataset_path, "train.csv"), index=False)
+    pd.DataFrame({"source_code": val_source_code, "label": val_labels}).to_csv(join(dataset_path, "val.csv"), index=False)
+
     X_chunked_train_tokenized = tokenizer(train_source_code,padding=True, truncation=True, max_length=512)
     X_chunked_val_tokenized = tokenizer(val_source_code,padding=True, truncation=True, max_length=512)
     train_dataset = Dataset(X_chunked_train_tokenized, train_labels)
@@ -315,6 +329,10 @@ if args.prepare_dataset:
 
     test_source_code,test_labels=prepare_dataset(test_data,tokenizer)
     filtered_test_source_code,filtered_test_labels=test_filter(test_source_code,test_labels)
+
+    # Save test CSV
+    pd.DataFrame({"source_code": filtered_test_source_code, "label": filtered_test_labels}).to_csv(join(dataset_path, "test.csv"), index=False)
+
     X_chunked_test_tokenized = tokenizer(filtered_test_source_code,padding=True, truncation=True, max_length=512)
     test_dataset = Dataset(X_chunked_test_tokenized,filtered_test_labels) 
 
